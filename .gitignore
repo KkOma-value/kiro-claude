@@ -1,0 +1,14 @@
+.claude/settings.local.json
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Local build directories
+bin/
+dist/

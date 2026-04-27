@@ -1,0 +1,27 @@
+server:
+  host: 127.0.0.1
+  port: 8000
+
+runtime:
+  # "mock" or "kiro-live"
+  mode: mock
+  # "default", "tool-use", "tool-chain", or "tool-result-error"
+  mock_scenario: default
+  upstream_endpoint: https://prod.us-east-1.codewhisperer.desktop.kiro.dev
+  # If true, kiro-live falls back to mock when credentials are unavailable.
+  allow_start_without_token: true
+
+kiro:
+  # Current implementation expands "~" when reading the config file.
+  cache_dir: ~/.aws/sso/cache
+  enable_multi_account: true
+  refresh_interval: 60
+
+proxy:
+  http_proxy: ""
+  https_proxy: ""
+  socks5_proxy: ""
+
+logging:
+  level: info
+  format: text
