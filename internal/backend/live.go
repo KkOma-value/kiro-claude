@@ -25,20 +25,20 @@ func NewLiveClient(cfg *config.Config, log logger.Logger) (*LiveClient, error) {
 	}
 
 	status := tokenMgr.Status()
-	log.Infof("Loaded %d Kiro credential(s)", status.TotalAccounts)
+	log.Infof("Loaded %d Kiro credential(s), auth=%s, region=%s", status.TotalAccounts, status.AuthMethod, status.Region)
 	log.Infof("Using credential %d/%d, expires at %s", status.CurrentIndex+1, status.TotalAccounts, status.ExpiresAt)
 
 	return &LiveClient{
 		tokenMgr: tokenMgr,
-		client:   gateway.NewClient(tokenMgr, cfg.Runtime.UpstreamEndpoint, cfg.Proxy, log),
+		client:   gateway.NewClient(tokenMgr, cfg.Proxy, log),
 	}, nil
 }
 
-func (c *LiveClient) SendRequest(ctx context.Context, req *gateway.CodeWhispererRequest) (*gateway.CodeWhispererResponse, error) {
+func (c *LiveClient) SendRequest(ctx context.Context, req *gateway.KiroRequest) (string, []gateway.KiroStreamEvent, error) {
 	return c.client.SendRequest(ctx, req)
 }
 
-func (c *LiveClient) SendStreamRequest(ctx context.Context, req *gateway.CodeWhispererRequest) (<-chan *gateway.CodeWhispererStreamChunk, <-chan error, error) {
+func (c *LiveClient) SendStreamRequest(ctx context.Context, req *gateway.KiroRequest) (<-chan gateway.KiroStreamEvent, <-chan error, error) {
 	return c.client.SendStreamRequest(ctx, req)
 }
 

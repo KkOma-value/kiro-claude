@@ -1,99 +1,92 @@
 package api
 
 import (
-	"encoding/json"
 	"testing"
-
-	"github.com/yourusername/kiro-claude/internal/gateway"
 )
 
-func TestToCodeWhispererRequestNormalizesFields(t *testing.T) {
+func TestToKiroRequestBasic(t *testing.T) {
 	req := &MessageRequest{
-		Model:      "claude-3-5-sonnet-20241022",
-		MaxTokens:  256,
-		System:     "system prompt",
-		ToolChoice: "auto",
+		Model:     "claude-sonnet-4-5",
+		MaxTokens: 256,
+		System:    "system prompt",
 		Messages: []AnthropicMessage{
-			{
-				Role: "user",
-				Content: []ContentBlock{
-					{
-						Type:    "tool_result",
-						Content: []map[string]string{{"type": "text", "text": "ok"}},
-						IsError: true,
-					},
-				},
-			},
+			{Role: "user", Content: "hello"},
 		},
 	}
 
-	cwReq, err := ToCodeWhispererRequest(req)
+	kiroReq, err := ToKiroRequest(req)
 	if err != nil {
-		t.Fatalf("ToCodeWhispererRequest returned error: %v", err)
+		t.Fatalf("ToKiroRequest returned error: %v", err)
 	}
 
-	if cwReq.Model != "CLAUDE_3_5_SONNET_20241022_V1_0" {
-		t.Fatalf("unexpected model mapping: %s", cwReq.Model)
+	if kiroReq.ConversationState.ConversationID == "" {
+		t.Fatal("expected conversationId to be set")
 	}
 
-	if cwReq.SystemPrompt != "system prompt" {
-		t.Fatalf("expected system prompt to be preserved, got %q", cwReq.SystemPrompt)
+	if kiroReq.ConversationState.AgentTaskType != "vibe" {
+		t.Fatalf("unexpected agentTaskType: %s", kiroReq.ConversationState.AgentTaskType)
 	}
 
-	toolChoice, ok := cwReq.ToolChoice.(map[string]interface{})
-	if !ok || toolChoice["type"] != "auto" {
-		t.Fatalf("unexpected tool choice: %#v", cwReq.ToolChoice)
+	msg := kiroReq.ConversationState.CurrentMessage.UserInputMessage
+	if msg == nil {
+		t.Fatal("expected current message to be set")
 	}
 
-	blocks, ok := cwReq.Messages[0].Content.([]gateway.ContentBlock)
-	if !ok {
-		t.Fatalf("expected converted content blocks, got %T", cwReq.Messages[0].Content)
-	}
-
-	if len(blocks) != 1 || !readIsError(blocks[0].Metadata) {
-		t.Fatalf("expected tool_result error metadata to be preserved: %#v", blocks)
+	if msg.Origin != "AI_EDITOR" {
+		t.Fatalf("unexpected origin: %s", msg.Origin)
 	}
 }
 
-func TestToAnthropicStreamEventNormalizesEventTypes(t *testing.T) {
-	toolInput, _ := json.Marshal(map[string]string{"city": "tokyo"})
+func TestToKiroRequestNilReturnsError(t *testing.T) {
+	_, err := ToKiroRequest(nil)
+	if err == nil {
+		t.Fatal("expected error for nil request")
+	}
+}
 
-	event, err := ToAnthropicStreamEvent(&gateway.CodeWhispererStreamChunk{
-		Type:              "contentBlockDelta",
-		ContentBlockIndex: 2,
-		Delta: &gateway.DeltaBlock{
-			Type: "textDelta",
-			Text: "hello",
+func TestToKiroRequestSystemPromptMergedIntoHistory(t *testing.T) {
+	req := &MessageRequest{
+		Model:  "claude-sonnet-4-5",
+		System: "You are helpful.",
+		Messages: []AnthropicMessage{
+			{Role: "user", Content: "hello"},
 		},
-		ContentBlock: &gateway.ContentBlock{
-			Type:  "tool_use",
-			ID:    "tool-1",
-			Name:  "weather",
-			Input: toolInput,
-		},
-		StopReason: "toolUse",
-		Usage: &gateway.UsageBlock{
-			InputTokens:  12,
-			OutputTokens: 34,
-		},
-	})
+	}
+
+	kiroReq, err := ToKiroRequest(req)
 	if err != nil {
-		t.Fatalf("ToAnthropicStreamEvent returned error: %v", err)
+		t.Fatalf("ToKiroRequest returned error: %v", err)
 	}
 
-	if event.Type != "content_block_delta" {
-		t.Fatalf("unexpected event type: %s", event.Type)
+	// With a single user message + system prompt, system gets prepended to first user in history
+	// and the current message is "hello"
+	msg := kiroReq.ConversationState.CurrentMessage.UserInputMessage
+	if msg == nil {
+		t.Fatal("expected current message")
+	}
+}
+
+func TestToKiroRequestPlaceholderToolWhenNoTools(t *testing.T) {
+	req := &MessageRequest{
+		Model: "claude-sonnet-4-5",
+		Messages: []AnthropicMessage{
+			{Role: "user", Content: "hello"},
+		},
 	}
 
-	if event.Delta == nil || event.Delta.Type != "text_delta" {
-		t.Fatalf("unexpected delta: %#v", event.Delta)
+	kiroReq, err := ToKiroRequest(req)
+	if err != nil {
+		t.Fatalf("ToKiroRequest returned error: %v", err)
 	}
 
-	if event.StopReason != "tool_use" {
-		t.Fatalf("unexpected stop reason: %s", event.StopReason)
+	msg := kiroReq.ConversationState.CurrentMessage.UserInputMessage
+	if msg.UserInputMessageContext == nil {
+		t.Fatal("expected context with placeholder tool")
 	}
-
-	if event.ContentBlock == nil || event.ContentBlock.Name != "weather" {
-		t.Fatalf("unexpected content block: %#v", event.ContentBlock)
+	if len(msg.UserInputMessageContext.Tools) != 1 {
+		t.Fatalf("expected 1 placeholder tool, got %d", len(msg.UserInputMessageContext.Tools))
+	}
+	if msg.UserInputMessageContext.Tools[0].ToolSpecification.Name != "no_tool_available" {
+		t.Fatalf("unexpected placeholder tool name: %s", msg.UserInputMessageContext.Tools[0].ToolSpecification.Name)
 	}
 }

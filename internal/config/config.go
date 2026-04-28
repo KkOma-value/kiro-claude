@@ -60,9 +60,9 @@ func DefaultConfig() *Config {
 			Port: 8000,
 		},
 		Runtime: RuntimeConfig{
-			Mode:                   "mock",
+			Mode:                   "kiro-live",
 			MockScenario:           "default",
-			UpstreamEndpoint:       "https://prod.us-east-1.codewhisperer.desktop.kiro.dev",
+			UpstreamEndpoint:       "",
 			AllowStartWithoutToken: true,
 		},
 		Kiro: KiroConfig{
