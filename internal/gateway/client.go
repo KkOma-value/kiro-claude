@@ -3,67 +3,107 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"regexp"
+	"runtime"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/yourusername/kiro-claude/internal/auth"
 	"github.com/yourusername/kiro-claude/internal/config"
 	"github.com/yourusername/kiro-claude/internal/logger"
 )
 
-// APIError wraps upstream HTTP failures with status information.
-type APIError struct {
-	StatusCode int
-	Message    string
-}
+const (
+	kiroVersion = "0.11.63"
+)
 
-func (e *APIError) Error() string {
-	if e.Message == "" {
-		return fmt.Sprintf("CodeWhisperer error: HTTP %d", e.StatusCode)
-	}
-	return e.Message
-}
-
-// Client wraps HTTP communication with CodeWhisperer API
+// Client wraps HTTP communication with Kiro generateAssistantResponse API
 type Client struct {
-	endpoint string
 	tokenMgr *auth.TokenManager
 	client   *http.Client
 	logger   logger.Logger
 }
 
-// NewClient creates a new CodeWhisperer client
-func NewClient(tokenMgr *auth.TokenManager, endpoint string, proxyCfg config.ProxyConfig, log logger.Logger) *Client {
-	transport := &http.Transport{}
+// NewClient creates a new Kiro gateway client
+func NewClient(tokenMgr *auth.TokenManager, proxyCfg config.ProxyConfig, log logger.Logger) *Client {
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+	}
 	if proxyURL := firstProxyURL(proxyCfg); proxyURL != nil {
 		transport.Proxy = http.ProxyURL(proxyURL)
 	}
 
 	return &Client{
-		endpoint: endpoint,
 		tokenMgr: tokenMgr,
 		logger:   log,
 		client: &http.Client{
-			Timeout:   120 * time.Second, // Longer timeout for streaming
+			Timeout:   180 * time.Second,
 			Transport: transport,
 		},
 	}
 }
 
-// Models returns the supported Anthropic-facing models for this backend.
 func (c *Client) Models() []ModelInfo {
 	return SupportedModels()
 }
 
-// SendRequest sends a request to CodeWhisperer API and returns the response
-func (c *Client) SendRequest(ctx context.Context, req *CodeWhispererRequest) (*CodeWhispererResponse, error) {
+// SendRequest sends a non-streaming request to Kiro and returns the full response text + tool calls
+func (c *Client) SendRequest(ctx context.Context, req *KiroRequest) (string, []KiroStreamEvent, error) {
+	body, err := c.doRequest(ctx, req)
+	if err != nil {
+		return "", nil, err
+	}
+	defer body.Close()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	return c.parseFullResponse(raw)
+}
+
+// SendStreamRequest sends a streaming request and returns a channel of parsed events
+func (c *Client) SendStreamRequest(ctx context.Context, req *KiroRequest) (<-chan KiroStreamEvent, <-chan error, error) {
+	body, err := c.doRequest(ctx, req)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	eventCh := make(chan KiroStreamEvent, 32)
+	errCh := make(chan error, 1)
+
+	go c.readKiroStream(body, eventCh, errCh)
+
+	return eventCh, errCh, nil
+}
+
+func (c *Client) Close() {}
+
+// doRequest builds and sends the HTTP request to Kiro
+func (c *Client) doRequest(ctx context.Context, req *KiroRequest) (io.ReadCloser, error) {
 	token, err := c.tokenMgr.GetAccessToken(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get access token: %w", err)
+	}
+
+	cred := c.tokenMgr.CurrentCredential()
+	region := cred.EffectiveRegion()
+	endpoint := fmt.Sprintf("https://q.%s.amazonaws.com/generateAssistantResponse", region)
+
+	// Set profileArn for social auth
+	if !cred.IsIDC() && cred.ProfileArn != "" {
+		req.ProfileArn = cred.ProfileArn
 	}
 
 	payload, err := json.Marshal(req)
@@ -71,105 +111,146 @@ func (c *Client) SendRequest(ctx context.Context, req *CodeWhispererRequest) (*C
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/api/v1/messages", bytes.NewReader(payload))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
+	// Set required headers matching KiroIDE format
+	machineID := generateMachineID(cred)
+	osName := getOSName()
+	goVersion := strings.TrimPrefix(runtime.Version(), "go")
+
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+token)
-	httpReq.Header.Set("User-Agent", "kiro-claude/1.0")
+	httpReq.Header.Set("amz-sdk-invocation-id", uuid.New().String())
+	httpReq.Header.Set("amz-sdk-request", "attempt=1; max=3")
+	httpReq.Header.Set("x-amzn-codewhisperer-optout", "true")
+	httpReq.Header.Set("x-amzn-kiro-agent-mode", "vibe")
+	httpReq.Header.Set("x-amz-user-agent", fmt.Sprintf("aws-sdk-js/1.0.34 KiroIDE-%s-%s", kiroVersion, machineID))
+	httpReq.Header.Set("User-Agent", fmt.Sprintf("aws-sdk-js/1.0.34 ua/2.1 os/%s lang/go md/go#%s api/codewhispererstreaming#1.0.34 m/E KiroIDE-%s-%s", osName, goVersion, kiroVersion, machineID))
+
+	c.logger.Debugf("Sending request to %s (region=%s, auth=%s)", endpoint, region, cred.AuthMethod)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer resp.Body.Close()
 
-	// Read response body
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// Handle non-200 responses
-	if resp.StatusCode != http.StatusOK {
-		c.logger.Warnf("CodeWhisperer request failed with status %d: %s", resp.StatusCode, string(respBody))
-
-		// Try to parse error response
-		var errResp struct {
-			Error *ErrorBlock `json:"error"`
-		}
-		if err := json.Unmarshal(respBody, &errResp); err == nil && errResp.Error != nil {
-			return nil, &APIError{
-				StatusCode: resp.StatusCode,
-				Message:    errResp.Error.Message,
-			}
-		}
-		return nil, &APIError{StatusCode: resp.StatusCode}
-	}
-
-	// Parse successful response
-	var cwResp CodeWhispererResponse
-	if err := json.Unmarshal(respBody, &cwResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return &cwResp, nil
-}
-
-// SendStreamRequest sends a request with streaming enabled and returns a channel of chunks
-func (c *Client) SendStreamRequest(ctx context.Context, req *CodeWhispererRequest) (<-chan *CodeWhispererStreamChunk, <-chan error, error) {
-	token, err := c.tokenMgr.GetAccessToken(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get access token: %w", err)
-	}
-
-	payload, err := json.Marshal(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/api/v1/messages", bytes.NewReader(payload))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+token)
-	httpReq.Header.Set("User-Agent", "kiro-claude/1.0")
-	httpReq.Header.Set("Accept", "text/event-stream")
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, nil, fmt.Errorf("HTTP request failed: %w", err)
-	}
-
-	// Check status code before streaming
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		respBody, _ := io.ReadAll(resp.Body)
-		c.logger.Warnf("CodeWhisperer stream request failed with status %d: %s", resp.StatusCode, string(respBody))
-		var errResp struct {
-			Error *ErrorBlock `json:"error"`
-		}
-		if err := json.Unmarshal(respBody, &errResp); err == nil && errResp.Error != nil {
-			return nil, nil, &APIError{
-				StatusCode: resp.StatusCode,
-				Message:    errResp.Error.Message,
-			}
-		}
-		return nil, nil, &APIError{StatusCode: resp.StatusCode}
+		c.logger.Warnf("Kiro request failed with status %d: %s", resp.StatusCode, string(respBody))
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(respBody)}
 	}
 
-	// Create channels for streaming
-	chunkChan := make(chan *CodeWhispererStreamChunk, 10)
-	errChan := make(chan error, 1)
+	return resp.Body, nil
+}
 
-	// Start goroutine to read stream
-	go c.readStream(resp.Body, chunkChan, errChan)
+// readKiroStream parses the Kiro custom SSE format: :message-typeevent{json}
+func (c *Client) readKiroStream(body io.ReadCloser, events chan<- KiroStreamEvent, errs chan<- error) {
+	defer body.Close()
+	defer close(events)
+	defer close(errs)
 
-	return chunkChan, errChan, nil
+	buf := make([]byte, 0, 65536)
+	readBuf := make([]byte, 8192)
+
+	for {
+		n, err := body.Read(readBuf)
+		if n > 0 {
+			buf = append(buf, readBuf[:n]...)
+
+			// Parse all complete events from buffer
+			buf = c.extractAndSendEvents(buf, events)
+		}
+		if err != nil {
+			if err != io.EOF {
+				errs <- fmt.Errorf("stream read error: %w", err)
+			}
+			// Process any remaining data
+			if len(buf) > 0 {
+				c.extractAndSendEvents(buf, events)
+			}
+			return
+		}
+	}
+}
+
+// sseEventRegex matches :message-typeevent followed by a JSON object
+var sseEventRegex = regexp.MustCompile(`:message-typeevent(\{[^}]*\})`)
+
+// extractAndSendEvents parses Kiro SSE events from buffer and sends them to channel.
+// Returns remaining unparsed bytes.
+func (c *Client) extractAndSendEvents(buf []byte, events chan<- KiroStreamEvent) []byte {
+	data := string(buf)
+
+	matches := sseEventRegex.FindAllStringSubmatchIndex(data, -1)
+	if len(matches) == 0 {
+		return buf
+	}
+
+	lastEnd := 0
+	for _, match := range matches {
+		if len(match) < 4 {
+			continue
+		}
+		jsonStart := match[2]
+		jsonEnd := match[3]
+		jsonStr := data[jsonStart:jsonEnd]
+
+		var evt KiroStreamEvent
+		if err := json.Unmarshal([]byte(jsonStr), &evt); err != nil {
+			c.logger.Debugf("Failed to parse SSE event JSON: %v", err)
+			lastEnd = match[1]
+			continue
+		}
+
+		// Skip followup prompts
+		if evt.FollowupPrompt != "" {
+			lastEnd = match[1]
+			continue
+		}
+
+		events <- evt
+		lastEnd = match[1]
+	}
+
+	if lastEnd > 0 && lastEnd <= len(buf) {
+		return buf[lastEnd:]
+	}
+	return buf
+}
+
+// parseFullResponse parses a non-streaming Kiro response (same SSE format but all at once)
+func (c *Client) parseFullResponse(raw []byte) (string, []KiroStreamEvent, error) {
+	data := string(raw)
+	var fullContent strings.Builder
+	var toolEvents []KiroStreamEvent
+
+	matches := sseEventRegex.FindAllStringSubmatch(data, -1)
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		var evt KiroStreamEvent
+		if err := json.Unmarshal([]byte(match[1]), &evt); err != nil {
+			continue
+		}
+		if evt.FollowupPrompt != "" {
+			continue
+		}
+		if evt.Name != "" && evt.ToolUseID != "" {
+			toolEvents = append(toolEvents, evt)
+		} else if evt.Content != "" {
+			// Unescape \n in content
+			content := strings.ReplaceAll(evt.Content, `\n`, "\n")
+			fullContent.WriteString(content)
+		}
+	}
+
+	return fullContent.String(), toolEvents, nil
 }
 
 func firstProxyURL(proxyCfg config.ProxyConfig) *url.URL {
@@ -178,7 +259,6 @@ func firstProxyURL(proxyCfg config.ProxyConfig) *url.URL {
 		proxyCfg.HTTPSProxy,
 		proxyCfg.HTTPProxy,
 	}
-
 	for _, rawURL := range candidates {
 		if rawURL == "" {
 			continue
@@ -188,94 +268,37 @@ func firstProxyURL(proxyCfg config.ProxyConfig) *url.URL {
 			return proxyURL
 		}
 	}
-
 	return nil
 }
 
-// readStream reads SSE stream and sends chunks to the channel
-func (c *Client) readStream(body io.ReadCloser, chunks chan<- *CodeWhispererStreamChunk, errs chan<- error) {
-	defer body.Close()
-	defer close(chunks)
-	defer close(errs)
+func generateMachineID(cred auth.Credential) string {
+	key := cred.ProfileArn
+	if key == "" {
+		key = cred.ClientID
+	}
+	if key == "" {
+		key = "KIRO_DEFAULT_MACHINE"
+	}
+	h := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("%x", h)
+}
 
-	reader := NewEventReader(body)
-	for {
-		line, err := reader.ReadLine()
-		if err != nil {
-			if err != io.EOF {
-				errs <- fmt.Errorf("stream read error: %w", err)
-			}
-			return
-		}
-
-		if len(line) == 0 {
-			continue // Empty line, skip
-		}
-
-		// Parse SSE "data: {json}" format
-		if bytes.HasPrefix(line, []byte("data: ")) {
-			jsonData := bytes.TrimPrefix(line, []byte("data: "))
-
-			var chunk CodeWhispererStreamChunk
-			if err := json.Unmarshal(jsonData, &chunk); err != nil {
-				errs <- fmt.Errorf("failed to parse chunk: %w", err)
-				continue
-			}
-
-			chunks <- &chunk
-		}
+func getOSName() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "macos"
+	case "windows":
+		return "windows"
+	default:
+		return runtime.GOOS
 	}
 }
 
-// NewEventReader creates a reader for SSE event streams
-// This is a helper for reading line-by-line from SSE
-func NewEventReader(r io.Reader) *EventReader {
-	return &EventReader{
-		reader: r,
-		buf:    make([]byte, 4096),
+// hostname returns the machine hostname or a fallback
+func hostname() string {
+	h, err := os.Hostname()
+	if err != nil {
+		return "unknown"
 	}
-}
-
-// EventReader reads lines from an SSE stream
-type EventReader struct {
-	reader io.Reader
-	buf    []byte
-	pos    int
-	end    int
-}
-
-// ReadLine reads the next line from the stream
-func (er *EventReader) ReadLine() ([]byte, error) {
-	for {
-		// Look for newline in buffer
-		for i := er.pos; i < er.end; i++ {
-			if er.buf[i] == '\n' {
-				line := er.buf[er.pos:i]
-				er.pos = i + 1
-				return line, nil
-			}
-		}
-
-		// No newline found, read more data
-		if er.pos > 0 {
-			// Move remaining data to start of buffer
-			copy(er.buf, er.buf[er.pos:er.end])
-			er.end -= er.pos
-			er.pos = 0
-		}
-
-		n, err := er.reader.Read(er.buf[er.end:])
-		if err != nil {
-			if er.end > er.pos {
-				// Return remaining data
-				line := er.buf[er.pos:er.end]
-				er.end = 0
-				er.pos = 0
-				return line, nil
-			}
-			return nil, err
-		}
-
-		er.end += n
-	}
+	return h
 }

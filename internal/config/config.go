@@ -67,8 +67,14 @@ func DefaultConfig() *Config {
 		},
 		Runtime: RuntimeConfig{
 			Mode:                   "kiro-live",
+<<<<<<< HEAD
 			UpstreamEndpoint:       "https://prod.us-east-1.codewhisperer.desktop.kiro.dev",
 			AllowStartWithoutToken: false,
+=======
+			MockScenario:           "default",
+			UpstreamEndpoint:       "",
+			AllowStartWithoutToken: true,
+>>>>>>> 4d4ec89bd026d39331474aa213c9129cc38e884e
 		},
 		Kiro: KiroConfig{
 			CacheDir:           "~/.aws/sso/cache",

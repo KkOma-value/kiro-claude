@@ -4,23 +4,43 @@ import (
 	"time"
 )
 
-// Credential represents a Kiro IDE SSO credential
+// Credential represents a Kiro IDE credential (supports both Social and IDC auth)
 type Credential struct {
-	AccessToken  string    `json:"accessToken"`
-	RefreshToken string    `json:"refreshToken"`
-	ExpiresAt    time.Time `json:"expiresAt"`
-	Region       string    `json:"region"`
-	ClientID     string    `json:"clientId"`
-	ClientSecret string    `json:"clientSecret"`
-	ProfileArn   string    `json:"profileArn,omitempty"`
+	AccessToken            string    `json:"accessToken"`
+	RefreshToken           string    `json:"refreshToken"`
+	ExpiresAt              time.Time `json:"expiresAt"`
+	Region                 string    `json:"region"`
+	IDCRegion              string    `json:"idcRegion,omitempty"`
+	ClientID               string    `json:"clientId,omitempty"`
+	ClientSecret           string    `json:"clientSecret,omitempty"`
+	ProfileArn             string    `json:"profileArn,omitempty"`
+	AuthMethod             string    `json:"authMethod,omitempty"` // "social" or "IdC" / "builder-id"
+	StartURL               string    `json:"startUrl,omitempty"`
+	RegistrationExpiresAt  string    `json:"registrationExpiresAt,omitempty"`
 }
 
-// IsExpired checks if the credential is expired or about to expire (within 10 minutes)
 func (c *Credential) IsExpired() bool {
-	return time.Now().After(c.ExpiresAt.Add(-10 * time.Minute))
+	return time.Now().After(c.ExpiresAt.Add(-2 * time.Minute))
 }
 
-// TokenStatus represents the current token state
+func (c *Credential) IsIDC() bool {
+	return c.AuthMethod == "IdC" || c.AuthMethod == "builder-id"
+}
+
+func (c *Credential) EffectiveRegion() string {
+	if c.Region != "" {
+		return c.Region
+	}
+	return "us-east-1"
+}
+
+func (c *Credential) EffectiveIDCRegion() string {
+	if c.IDCRegion != "" {
+		return c.IDCRegion
+	}
+	return c.EffectiveRegion()
+}
+
 type TokenStatus struct {
 	CurrentIndex  int
 	TotalAccounts int
@@ -28,4 +48,6 @@ type TokenStatus struct {
 	ExpiresAt     time.Time
 	IsExpired     bool
 	LastRefresh   time.Time
+	AuthMethod    string
+	Region        string
 }
