@@ -7,33 +7,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/yourusername/kiro-claude/internal/gateway"
-	"github.com/yourusername/kiro-claude/internal/model"
 )
 
-<<<<<<< HEAD
-// package-level resolver for model name resolution
-var modelResolver = model.NewResolver()
-
-// Converter handles bidirectional conversion between Anthropic and CodeWhisperer formats
-
-// ToCodeWhispererRequest converts an Anthropic message request to CodeWhisperer format
-func ToCodeWhispererRequest(req *MessageRequest) (*gateway.CodeWhispererRequest, error) {
-=======
 // ToKiroRequest converts an Anthropic Messages API request to a Kiro generateAssistantResponse request
 func ToKiroRequest(req *MessageRequest) (*gateway.KiroRequest, error) {
->>>>>>> 4d4ec89bd026d39331474aa213c9129cc38e884e
 	if req == nil {
 		return nil, fmt.Errorf("request is nil")
 	}
 
-<<<<<<< HEAD
-	// Map model name from Anthropic to CodeWhisperer internal ID using resolver
-	resolution := modelResolver.Resolve(req.Model)
-	cwModel := resolution.InternalID
-=======
 	kiroModel := gateway.MapModelToKiro(req.Model)
 	conversationID := uuid.New().String()
->>>>>>> 4d4ec89bd026d39331474aa213c9129cc38e884e
 
 	// Extract system prompt
 	systemPrompt := extractSystemPrompt(req.System)
@@ -104,34 +87,6 @@ func ToKiroRequest(req *MessageRequest) (*gateway.KiroRequest, error) {
 		userInput.UserInputMessageContext = ctx
 	}
 
-<<<<<<< HEAD
-	// Map model name back from CodeWhisperer to Anthropic using resolver
-	anthropicModel := modelResolver.ReverseResolve(cwResp.Model)
-
-	// Convert content blocks
-	content := make([]ContentBlock, len(cwResp.Content))
-	for i, cwBlock := range cwResp.Content {
-		content[i] = ContentBlockFromGateway(cwBlock)
-	}
-
-	// Map stop reason
-	stopReason := normalizeStopReason(cwResp.StopReason)
-	if stopReason == "" {
-		stopReason = "end_turn"
-	}
-
-	return &MessageResponse{
-		ID:           cwResp.ID,
-		Type:         "message",
-		Role:         "assistant",
-		Content:      content,
-		Model:        anthropicModel,
-		StopReason:   stopReason,
-		StopSequence: cwResp.StopSequence,
-		Usage: UsageBlock{
-			InputTokens:  cwResp.Usage.InputTokens,
-			OutputTokens: cwResp.Usage.OutputTokens,
-=======
 	kiroReq := &gateway.KiroRequest{
 		ConversationState: gateway.ConversationState{
 			AgentTaskType:   "vibe",
@@ -140,7 +95,6 @@ func ToKiroRequest(req *MessageRequest) (*gateway.KiroRequest, error) {
 			CurrentMessage: gateway.CurrentMessage{
 				UserInputMessage: userInput,
 			},
->>>>>>> 4d4ec89bd026d39331474aa213c9129cc38e884e
 		},
 	}
 

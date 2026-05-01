@@ -1,4 +1,7 @@
-.claude/settings.local.json
+# AI / Editor tooling
+.claude/
+.super-dev/
+output/
 
 # Go build artifacts
 *.exe
@@ -12,3 +15,13 @@
 # Local build directories
 bin/
 dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

@@ -29,7 +29,6 @@ type ServerConfig struct {
 type RuntimeConfig struct {
 	Mode                   string `yaml:"mode"`
 	UpstreamEndpoint       string `yaml:"upstream_endpoint"`
-	AllowStartWithoutToken bool   `yaml:"allow_start_without_token"`
 }
 
 // KiroConfig represents Kiro-specific settings
@@ -67,14 +66,7 @@ func DefaultConfig() *Config {
 		},
 		Runtime: RuntimeConfig{
 			Mode:                   "kiro-live",
-<<<<<<< HEAD
 			UpstreamEndpoint:       "https://prod.us-east-1.codewhisperer.desktop.kiro.dev",
-			AllowStartWithoutToken: false,
-=======
-			MockScenario:           "default",
-			UpstreamEndpoint:       "",
-			AllowStartWithoutToken: true,
->>>>>>> 4d4ec89bd026d39331474aa213c9129cc38e884e
 		},
 		Kiro: KiroConfig{
 			CacheDir:           "~/.aws/sso/cache",
@@ -145,9 +137,6 @@ func applyEnvOverrides(config *Config) {
 	}
 	if endpoint := os.Getenv("KIRO_UPSTREAM_ENDPOINT"); endpoint != "" {
 		config.Runtime.UpstreamEndpoint = endpoint
-	}
-	if allow := os.Getenv("KIRO_ALLOW_START_WITHOUT_TOKEN"); allow != "" {
-		config.Runtime.AllowStartWithoutToken = strings.EqualFold(allow, "true") || allow == "1"
 	}
 	if level := os.Getenv("LOG_LEVEL"); level != "" {
 		config.Logging.Level = level

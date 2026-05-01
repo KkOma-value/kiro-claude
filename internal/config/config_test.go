@@ -5,7 +5,6 @@ import "testing"
 func TestLoadConfigAppliesRuntimeEnvOverrides(t *testing.T) {
 	t.Setenv("KIRO_CLAUDE_MODE", "kiro-live")
 	t.Setenv("KIRO_UPSTREAM_ENDPOINT", "https://example.test")
-	t.Setenv("KIRO_ALLOW_START_WITHOUT_TOKEN", "false")
 
 	cfg, err := LoadConfig("")
 	if err != nil {
@@ -17,9 +16,6 @@ func TestLoadConfigAppliesRuntimeEnvOverrides(t *testing.T) {
 	}
 	if cfg.Runtime.UpstreamEndpoint != "https://example.test" {
 		t.Fatalf("unexpected endpoint: %s", cfg.Runtime.UpstreamEndpoint)
-	}
-	if cfg.Runtime.AllowStartWithoutToken {
-		t.Fatalf("expected allow_start_without_token to be false")
 	}
 }
 

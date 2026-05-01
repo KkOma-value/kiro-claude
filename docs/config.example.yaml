@@ -6,8 +6,7 @@ runtime:
   # Only "kiro-live" is supported
   mode: kiro-live
   upstream_endpoint: https://prod.us-east-1.codewhisperer.desktop.kiro.dev
-  # If true, server starts even when credentials are unavailable (returns errors on requests).
-  allow_start_without_token: false
+
 
 kiro:
   # Current implementation expands "~" when reading the config file.
