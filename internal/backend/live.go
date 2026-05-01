@@ -18,20 +18,27 @@ type LiveClient struct {
 
 // NewLiveClient creates a live Kiro-backed backend.
 func NewLiveClient(cfg *config.Config, log logger.Logger) (*LiveClient, error) {
+	client, _, err := NewLiveClientWithTokenMgr(cfg, log)
+	return client, err
+}
+
+// NewLiveClientWithTokenMgr creates a live Kiro-backed backend and returns the token manager.
+func NewLiveClientWithTokenMgr(cfg *config.Config, log logger.Logger) (*LiveClient, *auth.TokenManager, error) {
 	log.Infof("Loading Kiro credentials from %s", cfg.Kiro.CacheDir)
 	tokenMgr, err := auth.NewTokenManager(cfg.Kiro.CacheDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load credentials: %w", err)
+		return nil, nil, fmt.Errorf("failed to load credentials: %w", err)
 	}
 
 	status := tokenMgr.Status()
 	log.Infof("Loaded %d Kiro credential(s), auth=%s, region=%s", status.TotalAccounts, status.AuthMethod, status.Region)
 	log.Infof("Using credential %d/%d, expires at %s", status.CurrentIndex+1, status.TotalAccounts, status.ExpiresAt)
 
-	return &LiveClient{
+	client := &LiveClient{
 		tokenMgr: tokenMgr,
 		client:   gateway.NewClient(tokenMgr, cfg.Proxy, log),
-	}, nil
+	}
+	return client, tokenMgr, nil
 }
 
 func (c *LiveClient) SendRequest(ctx context.Context, req *gateway.KiroRequest) (string, []gateway.KiroStreamEvent, error) {

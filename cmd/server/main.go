@@ -13,6 +13,7 @@ import (
 	"github.com/yourusername/kiro-claude/internal/config"
 	"github.com/yourusername/kiro-claude/internal/logger"
 	"github.com/yourusername/kiro-claude/internal/middleware"
+	"github.com/yourusername/kiro-claude/internal/model"
 	"github.com/yourusername/kiro-claude/internal/runtime"
 )
 
@@ -37,15 +38,20 @@ func main() {
 	// Print startup banner
 	printStartupBanner(cfg, log)
 
-	client, err := runtime.BuildClient(cfg, log)
+	buildResult, err := runtime.BuildClient(cfg, log)
 	if err != nil {
 		log.Errorf("Failed to initialize backend: %v", err)
 		os.Exit(1)
 	}
-	defer client.Close()
+	defer buildResult.Client.Close()
 
 	// Create API handler
-	apiHandler := api.NewHandler(client, log)
+	apiHandler := api.NewHandler(buildResult.Client, log)
+
+	// Create model resolver and admin handler
+	resolver := model.NewResolver()
+	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+	adminHandler := api.NewAdminHandler(cfg, resolver, buildResult.TokenMgr, log, addr)
 
 	// Setup HTTP routes
 	mux := http.NewServeMux()
@@ -53,6 +59,11 @@ func main() {
 	mux.HandleFunc("GET /v1/models", apiHandler.HandleModels)
 	mux.HandleFunc("GET /health", apiHandler.HandleHealth)
 	mux.HandleFunc("GET /", apiHandler.HandleHealth)
+
+	// Management API routes (for web frontend)
+	mux.HandleFunc("GET /api/status", adminHandler.HandleStatus)
+	mux.HandleFunc("POST /api/resolve-model", adminHandler.HandleResolveModel)
+	mux.HandleFunc("GET /api/endpoints", adminHandler.HandleEndpoints)
 
 	// Apply middleware layers (outer → inner)
 	var handler http.Handler = mux
@@ -64,7 +75,6 @@ func main() {
 	handler = middleware.NewAuthGuard(cfg.Security.ProxyAPIKey, handler)
 
 	// Create HTTP server
-	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	server := &http.Server{
 		Addr:    addr,
 		Handler: handler,
