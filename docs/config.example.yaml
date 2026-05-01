@@ -3,13 +3,11 @@ server:
   port: 8000
 
 runtime:
-  # "mock" or "kiro-live"
-  mode: mock
-  # "default", "tool-use", "tool-chain", or "tool-result-error"
-  mock_scenario: default
+  # Only "kiro-live" is supported
+  mode: kiro-live
   upstream_endpoint: https://prod.us-east-1.codewhisperer.desktop.kiro.dev
-  # If true, kiro-live falls back to mock when credentials are unavailable.
-  allow_start_without_token: true
+  # If true, server starts even when credentials are unavailable (returns errors on requests).
+  allow_start_without_token: false
 
 kiro:
   # Current implementation expands "~" when reading the config file.
@@ -22,6 +20,14 @@ proxy:
   https_proxy: ""
   socks5_proxy: ""
 
+# Proxy API key guard. When set, all API endpoints (except /health)
+# require authentication via x-api-key or Authorization: Bearer header.
+# Leave empty to disable auth.
+security:
+  proxy_api_key: ""
+
 logging:
   level: info
   format: text
+  # When true, dumps request/response bodies to log for debugging.
+  debug_dump: false

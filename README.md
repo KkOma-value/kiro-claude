@@ -1,69 +1,99 @@
-# kiro-claude
+<div align="center">
+  <h1>Kiro Claude Proxy</h1>
+  <p>A production-grade reverse proxy exposing an Anthropic-compatible API for Claude Code, routing to AWS CodeWhisperer (Kiro).</p>
+</div>
 
-`kiro-claude` exposes an Anthropic-compatible HTTP surface for Claude Code and can run in two runtime modes:
+---
 
-- `mock`: local development with no Kiro token required
-- `kiro-live`: forward requests to the real Kiro upstream
+## ✨ Features
 
-The current server exposes:
+- 🧠 **Smart Model Resolution**: Automatically normalizes model names (e.g., `claude-sonnet-4-5-20250929` → `claude-sonnet-4.5`) while passing unknown models through to Kiro.
+- 🛡️ **API Key Guard**: Secure your local proxy using standard `x-api-key` or `Authorization: Bearer` headers.
+- 🔑 **Auto-Detect Auth**: Seamlessly supports both Kiro IDE Desktop (`~/.aws/sso/cache`) and AWS SSO (OIDC) credentials without manual configuration.
+- 🔄 **Multi-Account Failover**: Automatically rotates credentials on recoverable errors (e.g., 429 Rate Limit, 402 Quota Exceeded).
+- 🐛 **Debug Logging**: Built-in request/response dumping for easy troubleshooting.
 
-- `POST /v1/messages`
-- `GET /v1/models`
-- `GET /health`
+## 🚀 Quick Start
 
-## Quick start
+### 1. Prerequisites
 
-Start the gateway with the example config:
+You need valid Kiro credentials from one of the following sources:
+- Kiro IDE Desktop (cached under `~/.aws/sso/cache`)
+- AWS SSO (OIDC) credentials via `kiro-cli login`
+- Environment variable `KIRO_REFRESH_TOKEN`
 
-```powershell
-go run ./cmd/server -config .\docs\config.example.yaml
+### 2. Start the Gateway
+
+Run the server using the provided example configuration:
+
+```bash
+go run ./cmd/server -config ./docs/config.example.yaml
 ```
 
-The default listen address in the current implementation is `http://127.0.0.1:8000`.
+*By default, the server listens on `http://127.0.0.1:8000`.*
 
-Point Claude Code at the gateway by setting `ANTHROPIC_BASE_URL` in the same shell where you launch Claude Code:
+### 3. Connect Claude Code
 
+In a new terminal window, configure Claude Code to use your local proxy:
+
+**macOS / Linux:**
+```bash
+export ANTHROPIC_BASE_URL="http://127.0.0.1:8000"
+claude
+```
+
+**Windows (PowerShell):**
 ```powershell
 $env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8000"
 claude
 ```
 
-For macOS or Linux:
+## ⚙️ Configuration
 
-```bash
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8000
-claude
+The server accepts a YAML configuration file via the `-config` flag. The default path is `~/.config/kiro-claude/config.yaml`.
+
+See [`docs/config.example.yaml`](docs/config.example.yaml) for a complete example.
+
+### Security
+
+To protect your proxy from unauthorized access on your local network, set an API key:
+
+```yaml
+# config.yaml
+security:
+  proxy_api_key: "your-secret-key"
 ```
 
-## Runtime modes
+When set, all API endpoints (except `/health`) require authentication. Claude Code will automatically send this key if you configure it, or you can pass it manually via `x-api-key` or `Authorization: Bearer`.
 
-### `mock`
+### Environment Variables
 
-`mock` is the default mode. It is intended for local integration work when you do not have a Kiro token yet.
+You can override configuration using the following environment variables:
 
-- No Kiro credential is required
-- `runtime.mock_scenario: default` returns deterministic text when no tools are provided, and starts a tool loop when tools are present
-- `runtime.mock_scenario: tool-use` follows the same tool-first behavior and remains available as an explicit scenario name
-- `runtime.mock_scenario: tool-chain` asks for a follow-up tool after the first successful `tool_result`
-- `runtime.mock_scenario: tool-result-error` retries a tool after an error-marked `tool_result`
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `KIRO_CLAUDE_HOST` | Bind host | `127.0.0.1` |
+| `KIRO_CLAUDE_PORT` | Bind port | `8000` |
+| `KIRO_UPSTREAM_ENDPOINT`| Kiro upstream URL | `https://prod.us-east-1...` |
+| `KIRO_CACHE_DIR` | SSO cache directory | `~/.aws/sso/cache` |
+| `KIRO_REFRESH_TOKEN` | Manual refresh token | - |
+| `KIRO_REGION` | Kiro region | `us-east-1` |
+| `KIRO_PROXY_API_KEY` | Proxy API key | - |
+| `KIRO_DEBUG_DUMP` | Enable debug logging (`true`/`false`) | `false` |
+| `HTTP_PROXY` / `HTTPS_PROXY`| Proxy settings | - |
 
-### `kiro-live`
+## 📡 API Endpoints
 
-`kiro-live` attempts to load Kiro credentials and forward requests to `runtime.upstream_endpoint`.
+The proxy exposes the following Anthropic-compatible endpoints:
 
-Credential sources supported by the current Go implementation:
+- `POST /v1/messages` — Message generation (supports both streaming and non-streaming)
+- `GET /v1/models` — List available models
+- `GET /health` — Health check
 
-- cached JSON credentials under `kiro.cache_dir`
-- environment variables `KIRO_REFRESH_TOKEN` and `KIRO_REGION`
+## 📖 Credential Resolution
 
-If `runtime.allow_start_without_token` is `true`, startup falls back to `mock` when live credentials cannot be loaded. If it is `false`, startup fails instead.
+The gateway loads credentials in the following priority order:
+1. Cached JSON credentials under `kiro.cache_dir`
+2. Environment variables (`KIRO_REFRESH_TOKEN` + `KIRO_REGION`)
 
-## Configuration
-
-The server accepts a YAML config file through `-config`. The default config path in the current binary is:
-
-```text
-~/.config/kiro-claude/config.yaml
-```
-
-A complete example is in [docs/config.example.yaml](D:\kiro-claude\docs\config.example.yaml) and operational notes are in [docs/usage.md](D:\kiro-claude\docs\usage.md).
+The authentication provider (Desktop vs. AWS SSO) is automatically determined based on the presence of `clientId` and `clientSecret` in the payload.

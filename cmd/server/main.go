@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/yourusername/kiro-claude/internal/api"
 	"github.com/yourusername/kiro-claude/internal/config"
 	"github.com/yourusername/kiro-claude/internal/logger"
+	"github.com/yourusername/kiro-claude/internal/middleware"
 	"github.com/yourusername/kiro-claude/internal/runtime"
 )
 
@@ -31,8 +33,9 @@ func main() {
 
 	// Initialize logger
 	log := logger.NewSimpleLogger(logger.ParseLevel(cfg.Logging.Level))
-	log.Infof("Starting Kiro → Claude Code gateway")
-	log.Infof("Config: %+v", cfg)
+
+	// Print startup banner
+	printStartupBanner(cfg, log)
 
 	client, err := runtime.BuildClient(cfg, log)
 	if err != nil {
@@ -51,11 +54,20 @@ func main() {
 	mux.HandleFunc("GET /health", apiHandler.HandleHealth)
 	mux.HandleFunc("GET /", apiHandler.HandleHealth)
 
+	// Apply middleware layers (outer → inner)
+	var handler http.Handler = mux
+
+	// Debug logger middleware (innermost)
+	handler = middleware.NewDebugLogger(cfg.Logging.DebugDump, log, handler)
+
+	// Auth guard middleware (outermost — checked first)
+	handler = middleware.NewAuthGuard(cfg.Security.ProxyAPIKey, handler)
+
 	// Create HTTP server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	server := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: handler,
 	}
 
 	// Setup graceful shutdown
@@ -77,4 +89,32 @@ func main() {
 	}
 
 	log.Infof("Gateway stopped")
+}
+
+// printStartupBanner logs a structured startup summary.
+func printStartupBanner(cfg *config.Config, log logger.Logger) {
+	log.Infof("Starting Kiro → Claude Code gateway")
+	log.Infof("Runtime mode: %s", cfg.Runtime.Mode)
+	log.Infof("Active backend: %s", cfg.Runtime.UpstreamEndpoint)
+
+	// Auth guard status
+	if cfg.Security.ProxyAPIKey != "" {
+		maskedKey := maskAPIKey(cfg.Security.ProxyAPIKey)
+		log.Infof("Auth guard: enabled (key: %s)", maskedKey)
+	} else {
+		log.Infof("Auth guard: disabled (no proxy_api_key configured)")
+	}
+
+	// Debug dump
+	if cfg.Logging.DebugDump {
+		log.Infof("Debug dump: enabled")
+	}
+}
+
+// maskAPIKey masks the middle of an API key for safe logging.
+func maskAPIKey(key string) string {
+	if len(key) <= 6 {
+		return "***"
+	}
+	return key[:3] + strings.Repeat("*", len(key)-6) + key[len(key)-3:]
 }

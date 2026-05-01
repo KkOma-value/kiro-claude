@@ -13,28 +13,19 @@ import (
 func BuildClient(cfg *config.Config, log logger.Logger) (backend.Client, error) {
 	mode := strings.ToLower(strings.TrimSpace(cfg.Runtime.Mode))
 	if mode == "" {
-		mode = "mock"
+		mode = "kiro-live"
 	}
 
 	switch mode {
-	case "mock":
-		log.Infof("Runtime mode: mock")
-		log.Infof("Active backend: local mock (%s scenario)", cfg.Runtime.MockScenario)
-		return backend.NewMockClient(cfg), nil
 	case "kiro-live":
 		log.Infof("Runtime mode: kiro-live")
 		log.Infof("Active backend: %s", cfg.Runtime.UpstreamEndpoint)
 		client, err := backend.NewLiveClient(cfg, log)
-		if err == nil {
-			return client, nil
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize live backend: %w", err)
 		}
-		if cfg.Runtime.AllowStartWithoutToken {
-			log.Warnf("Live backend unavailable, falling back to mock mode: %v", err)
-			log.Infof("Active backend: local mock (%s scenario)", cfg.Runtime.MockScenario)
-			return backend.NewMockClient(cfg), nil
-		}
-		return nil, err
+		return client, nil
 	default:
-		return nil, fmt.Errorf("unsupported runtime mode: %s", cfg.Runtime.Mode)
+		return nil, fmt.Errorf("unsupported runtime mode: %s (only 'kiro-live' is supported)", cfg.Runtime.Mode)
 	}
 }

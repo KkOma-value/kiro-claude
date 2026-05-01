@@ -5,7 +5,11 @@ import (
 	"fmt"
 
 	"github.com/yourusername/kiro-claude/internal/gateway"
+	"github.com/yourusername/kiro-claude/internal/model"
 )
+
+// package-level resolver for model name resolution
+var modelResolver = model.NewResolver()
 
 // Converter handles bidirectional conversion between Anthropic and CodeWhisperer formats
 
@@ -15,12 +19,9 @@ func ToCodeWhispererRequest(req *MessageRequest) (*gateway.CodeWhispererRequest,
 		return nil, fmt.Errorf("request is nil")
 	}
 
-	// Map model name from Anthropic to CodeWhisperer internal ID
-	cwModel := gateway.ModelNameMapping[req.Model]
-	if cwModel == "" {
-		// Default: use the model name as-is (some models may be known directly)
-		cwModel = req.Model
-	}
+	// Map model name from Anthropic to CodeWhisperer internal ID using resolver
+	resolution := modelResolver.Resolve(req.Model)
+	cwModel := resolution.InternalID
 
 	// Convert messages
 	cwMessages := make([]gateway.Message, len(req.Messages))
@@ -99,11 +100,8 @@ func ToAnthropicResponse(cwResp *gateway.CodeWhispererResponse) (*MessageRespons
 		return nil, fmt.Errorf("response is nil")
 	}
 
-	// Map model name back from CodeWhisperer to Anthropic
-	anthropicModel := gateway.ReverseModelMapping[cwResp.Model]
-	if anthropicModel == "" {
-		anthropicModel = cwResp.Model // Fallback to original name
-	}
+	// Map model name back from CodeWhisperer to Anthropic using resolver
+	anthropicModel := modelResolver.ReverseResolve(cwResp.Model)
 
 	// Convert content blocks
 	content := make([]ContentBlock, len(cwResp.Content))

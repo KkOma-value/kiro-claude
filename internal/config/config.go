@@ -11,11 +11,12 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Server  ServerConfig  `yaml:"server"`
-	Runtime RuntimeConfig `yaml:"runtime"`
-	Kiro    KiroConfig    `yaml:"kiro"`
-	Proxy   ProxyConfig   `yaml:"proxy"`
-	Logging LoggingConfig `yaml:"logging"`
+	Server   ServerConfig   `yaml:"server"`
+	Runtime  RuntimeConfig  `yaml:"runtime"`
+	Kiro     KiroConfig     `yaml:"kiro"`
+	Proxy    ProxyConfig    `yaml:"proxy"`
+	Security SecurityConfig `yaml:"security"`
+	Logging  LoggingConfig  `yaml:"logging"`
 }
 
 // ServerConfig represents server settings
@@ -27,7 +28,6 @@ type ServerConfig struct {
 // RuntimeConfig represents backend runtime settings.
 type RuntimeConfig struct {
 	Mode                   string `yaml:"mode"`
-	MockScenario           string `yaml:"mock_scenario"`
 	UpstreamEndpoint       string `yaml:"upstream_endpoint"`
 	AllowStartWithoutToken bool   `yaml:"allow_start_without_token"`
 }
@@ -46,10 +46,16 @@ type ProxyConfig struct {
 	SOCKS5Proxy string `yaml:"socks5_proxy"`
 }
 
+// SecurityConfig represents proxy auth settings
+type SecurityConfig struct {
+	ProxyAPIKey string `yaml:"proxy_api_key"` // empty = no auth required
+}
+
 // LoggingConfig represents logging settings
 type LoggingConfig struct {
-	Level  string `yaml:"level"`  // "debug", "info", "warn", "error"
-	Format string `yaml:"format"` // "json", "text"
+	Level     string `yaml:"level"`      // "debug", "info", "warn", "error"
+	Format    string `yaml:"format"`     // "json", "text"
+	DebugDump bool   `yaml:"debug_dump"` // dump request/response to log
 }
 
 // DefaultConfig returns default configuration
@@ -60,10 +66,9 @@ func DefaultConfig() *Config {
 			Port: 8000,
 		},
 		Runtime: RuntimeConfig{
-			Mode:                   "mock",
-			MockScenario:           "default",
+			Mode:                   "kiro-live",
 			UpstreamEndpoint:       "https://prod.us-east-1.codewhisperer.desktop.kiro.dev",
-			AllowStartWithoutToken: true,
+			AllowStartWithoutToken: false,
 		},
 		Kiro: KiroConfig{
 			CacheDir:           "~/.aws/sso/cache",
@@ -75,9 +80,13 @@ func DefaultConfig() *Config {
 			HTTPSProxy:  "",
 			SOCKS5Proxy: "",
 		},
+		Security: SecurityConfig{
+			ProxyAPIKey: "",
+		},
 		Logging: LoggingConfig{
-			Level:  "info",
-			Format: "text",
+			Level:     "info",
+			Format:    "text",
+			DebugDump: false,
 		},
 	}
 }
@@ -128,9 +137,6 @@ func applyEnvOverrides(config *Config) {
 	if mode := os.Getenv("KIRO_CLAUDE_MODE"); mode != "" {
 		config.Runtime.Mode = mode
 	}
-	if scenario := os.Getenv("KIRO_CLAUDE_MOCK_SCENARIO"); scenario != "" {
-		config.Runtime.MockScenario = scenario
-	}
 	if endpoint := os.Getenv("KIRO_UPSTREAM_ENDPOINT"); endpoint != "" {
 		config.Runtime.UpstreamEndpoint = endpoint
 	}
@@ -145,5 +151,11 @@ func applyEnvOverrides(config *Config) {
 	}
 	if httpsProxy := os.Getenv("HTTPS_PROXY"); httpsProxy != "" {
 		config.Proxy.HTTPSProxy = httpsProxy
+	}
+	if apiKey := os.Getenv("KIRO_PROXY_API_KEY"); apiKey != "" {
+		config.Security.ProxyAPIKey = apiKey
+	}
+	if debugDump := os.Getenv("KIRO_DEBUG_DUMP"); debugDump != "" {
+		config.Logging.DebugDump = strings.EqualFold(debugDump, "true") || debugDump == "1"
 	}
 }
