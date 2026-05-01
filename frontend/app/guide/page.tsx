@@ -28,10 +28,10 @@ const clients = [
     difficulty: "Easy",
   },
   {
-    name: "Cline",
+    name: "Cline (same as Claude Code)",
     href: "/guide/claude-code",
     icon: Globe,
-    description: "VS Code extension for AI coding",
+    description: "VS Code extension for AI coding — uses the same endpoint config",
     difficulty: "Easy",
   },
 ]

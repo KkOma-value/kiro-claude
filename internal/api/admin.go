@@ -22,6 +22,7 @@ type AdminHandler struct {
 	log         logger.Logger
 	startTime   time.Time
 	bindAddress string
+	httpClient  *http.Client
 }
 
 // NewAdminHandler creates a new admin API handler.
@@ -40,6 +41,7 @@ func NewAdminHandler(
 		log:         log,
 		startTime:   time.Now(),
 		bindAddress: bindAddress,
+		httpClient:  &http.Client{Timeout: 5 * time.Second},
 	}
 }
 
@@ -89,7 +91,7 @@ func (h *AdminHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 
 	maskedKey := ""
 	if h.cfg.Security.ProxyAPIKey != "" {
-		maskedKey = maskKey(h.cfg.Security.ProxyAPIKey)
+		maskedKey = MaskAPIKey(h.cfg.Security.ProxyAPIKey)
 	}
 
 	resp := StatusResponse{
@@ -201,10 +203,19 @@ func (h *AdminHandler) checkEndpoint(method, path string) EndpointInfo {
 	start := time.Now()
 	status := "ok"
 
-	client := &http.Client{Timeout: 5 * time.Second}
 	reqURL := "http://" + h.bindAddress + path
 
-	resp, err := client.Get(reqURL)
+	req, err := http.NewRequest(method, reqURL, nil)
+	if err != nil {
+		return EndpointInfo{
+			Path:      path,
+			Method:    method,
+			Status:    "error",
+			LatencyMs: 0,
+		}
+	}
+
+	resp, err := h.httpClient.Do(req)
 	latency := time.Since(start).Milliseconds()
 
 	if err != nil {
@@ -228,7 +239,7 @@ func (h *AdminHandler) checkEndpoint(method, path string) EndpointInfo {
 
 // --- helpers ---
 
-func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(data)
@@ -238,7 +249,8 @@ func writeAdminError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
-func maskKey(key string) string {
+// MaskAPIKey masks the middle of an API key for safe display.
+func MaskAPIKey(key string) string {
 	if len(key) <= 6 {
 		return "***"
 	}

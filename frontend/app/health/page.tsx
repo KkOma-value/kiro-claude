@@ -17,18 +17,28 @@ export default function HealthPage() {
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [endpoints, setEndpoints] = useState<EndpointsResponse | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
+  const [error, setError] = useState<string | null>(null)
 
   const refresh = () => {
     Promise.all([
-      fetch("/api/status").then((r) => r.json()),
-      fetch("/api/endpoints").then((r) => r.json()),
+      fetch("/api/status").then((r) => {
+        if (!r.ok) throw new Error(`Status: HTTP ${r.status}`)
+        return r.json()
+      }),
+      fetch("/api/endpoints").then((r) => {
+        if (!r.ok) throw new Error(`Endpoints: HTTP ${r.status}`)
+        return r.json()
+      }),
     ])
       .then(([s, e]) => {
         setStatus(s)
         setEndpoints(e)
         setLastRefresh(new Date())
+        setError(null)
       })
-      .catch(() => {})
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Failed to refresh")
+      })
   }
 
   useEffect(() => {
@@ -44,6 +54,11 @@ export default function HealthPage() {
         description="Real-time proxy status and endpoint health"
       />
       <div className="p-6 space-y-6">
+        {error && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+            {error}
+          </div>
+        )}
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">
             Auto-refresh every 10 seconds

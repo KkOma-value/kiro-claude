@@ -17,6 +17,7 @@ import type { ModelsResponse, ResolveResponse } from "@/lib/types"
 
 export default function ModelsPage() {
   const [models, setModels] = useState<ModelsResponse | null>(null)
+  const [modelsError, setModelsError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [resolveResult, setResolveResult] = useState<ResolveResponse | null>(null)
   const [resolveLoading, setResolveLoading] = useState(false)
@@ -24,9 +25,14 @@ export default function ModelsPage() {
 
   useEffect(() => {
     fetch("/api/models")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      })
       .then(setModels)
-      .catch(() => {})
+      .catch((err: unknown) => {
+        setModelsError(err instanceof Error ? err.message : "Failed to load models")
+      })
   }, [])
 
   const handleResolve = () => {
@@ -56,6 +62,11 @@ export default function ModelsPage() {
         description="View supported models and test name resolution"
       />
       <div className="p-6 space-y-6">
+        {modelsError && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+            Failed to load models: {modelsError}
+          </div>
+        )}
         {/* Model Resolver Tester */}
         <Card>
           <CardHeader>

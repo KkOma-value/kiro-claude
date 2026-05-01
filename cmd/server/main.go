@@ -109,7 +109,7 @@ func printStartupBanner(cfg *config.Config, log logger.Logger) {
 
 	// Auth guard status
 	if cfg.Security.ProxyAPIKey != "" {
-		maskedKey := maskAPIKey(cfg.Security.ProxyAPIKey)
+		maskedKey := api.MaskAPIKey(cfg.Security.ProxyAPIKey)
 		log.Infof("Auth guard: enabled (key: %s)", maskedKey)
 	} else {
 		log.Infof("Auth guard: disabled (no proxy_api_key configured)")
@@ -119,12 +119,4 @@ func printStartupBanner(cfg *config.Config, log logger.Logger) {
 	if cfg.Logging.DebugDump {
 		log.Infof("Debug dump: enabled")
 	}
-}
-
-// maskAPIKey masks the middle of an API key for safe logging.
-func maskAPIKey(key string) string {
-	if len(key) <= 6 {
-		return "***"
-	}
-	return key[:3] + strings.Repeat("*", len(key)-6) + key[len(key)-3:]
 }

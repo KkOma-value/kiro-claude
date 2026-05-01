@@ -14,12 +14,18 @@ import type { StatusResponse } from "@/lib/types"
 
 export default function ConfigPage() {
   const [status, setStatus] = useState<StatusResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch("/api/status")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      })
       .then(setStatus)
-      .catch(() => {})
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Failed to load configuration")
+      })
   }, [])
 
   return (
@@ -29,6 +35,11 @@ export default function ConfigPage() {
         description="Current proxy configuration (read-only)"
       />
       <div className="p-6 space-y-6">
+        {error && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+            Failed to load configuration: {error}
+          </div>
+        )}
         {/* Runtime Config */}
         <Card>
           <CardHeader>

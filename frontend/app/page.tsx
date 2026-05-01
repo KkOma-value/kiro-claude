@@ -71,9 +71,14 @@ export default function DashboardPage() {
                 {status?.mode || "..."}
               </div>
               <p className="text-xs text-muted-foreground">
-                {status?.upstream_endpoint
-                  ? new URL(status.upstream_endpoint).hostname
-                  : "Not connected"}
+                {(() => {
+                  if (!status?.upstream_endpoint) return "Not connected"
+                  try {
+                    return new URL(status.upstream_endpoint).hostname
+                  } catch {
+                    return "Invalid endpoint"
+                  }
+                })()}
               </p>
             </CardContent>
           </Card>

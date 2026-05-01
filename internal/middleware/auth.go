@@ -28,9 +28,11 @@ func NewAuthGuard(apiKey string, next http.Handler) http.Handler {
 }
 
 func (a *AuthGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Skip auth for health and root endpoints
+	// Skip auth for health, root, and admin API endpoints.
+	// Admin API paths (/api/*) are used by the management web frontend which is
+	// protected by network boundary (localhost only), not by proxy API keys.
 	path := r.URL.Path
-	if path == "/health" || path == "/" {
+	if path == "/health" || path == "/" || strings.HasPrefix(path, "/api/") {
 		a.next.ServeHTTP(w, r)
 		return
 	}
